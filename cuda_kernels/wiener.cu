@@ -14,67 +14,31 @@ __device__ __forceinline__ float frequency_component(int idx, int n, float pixel
     return ((float)shifted) / ((float)n * pixel_size);
 }
 
-extern "C" __global__ void dft2_forward_real_to_complex(
-    const float* d_in,
-    float* d_out_real,
-    float* d_out_imag,
-    int batch,
-    int n
-) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_freq = batch * n * n;
-    if (idx >= total_freq) {
-        return;
-    }
-
-    int image_stride = n * n;
-    int b = idx / image_stride;
-    int rem = idx % image_stride;
-    int ky = rem / n;
-    int kx = rem % n;
-
-    float sum_real = 0.0f;
-    float sum_imag = 0.0f;
-
-    for (int y = 0; y < n; ++y) {
-        for (int x = 0; x < n; ++x) {
-            int input_idx = b * image_stride + y * n + x;
-            float angle = WIENER_TWO_PI_F * ((float)kx * (float)x + (float)ky * (float)y) / (float)n;
-            float v = d_in[input_idx];
-            sum_real += v * cosf(angle);
-            sum_imag -= v * sinf(angle);
-        }
-    }
-
-    d_out_real[idx] = sum_real;
-    d_out_imag[idx] = sum_imag;
-}
-
 extern "C" __global__ void apply_wiener_frequency(
-    float* d_freq_real,
-    float* d_freq_imag,
+    float2* d_freq,
     const float* d_defocus,
     const float* d_wiener_factor,
     int batch,
     int n,
+    int freq_width,
     float pixel_size,
     float wavelength,
     float spherical_aberration,
     float q0
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_freq = batch * n * n;
+    int total_freq = batch * n * freq_width;
     if (idx >= total_freq) {
         return;
     }
 
-    int image_stride = n * n;
+    int image_stride = n * freq_width;
     int b = idx / image_stride;
     int rem = idx % image_stride;
-    int ky = rem / n;
-    int kx = rem % n;
+    int ky = rem / freq_width;
+    int kx = rem % freq_width;
 
-    float fx = frequency_component(kx, n, pixel_size);
+    float fx = ((float)kx) / ((float)n * pixel_size);
     float fy = frequency_component(ky, n, pixel_size);
     float k2 = fx * fx + fy * fy;
 
@@ -86,39 +50,20 @@ extern "C" __global__ void apply_wiener_frequency(
     float denom = ctf * ctf + d_wiener_factor[b];
     float scale = (denom > 1e-20f) ? (ctf / denom) : 0.0f;
 
-    d_freq_real[idx] *= scale;
-    d_freq_imag[idx] *= scale;
+    float2 value = d_freq[idx];
+    value.x *= scale;
+    value.y *= scale;
+    d_freq[idx] = value;
 }
 
-extern "C" __global__ void dft2_inverse_complex_to_real(
-    const float* d_freq_real,
-    const float* d_freq_imag,
+extern "C" __global__ void normalize_real_image(
     float* d_out,
-    int batch,
-    int n
+    int total_elements,
+    float norm
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total_spatial = batch * n * n;
-    if (idx >= total_spatial) {
+    if (idx >= total_elements) {
         return;
     }
-
-    int image_stride = n * n;
-    int b = idx / image_stride;
-    int rem = idx % image_stride;
-    int y = rem / n;
-    int x = rem % n;
-
-    float sum_real = 0.0f;
-    for (int ky = 0; ky < n; ++ky) {
-        for (int kx = 0; kx < n; ++kx) {
-            int freq_idx = b * image_stride + ky * n + kx;
-            float angle = WIENER_TWO_PI_F * ((float)kx * (float)x + (float)ky * (float)y) / (float)n;
-            float fr = d_freq_real[freq_idx];
-            float fi = d_freq_imag[freq_idx];
-            sum_real += fr * cosf(angle) - fi * sinf(angle);
-        }
-    }
-
-    d_out[idx] = sum_real / ((float)n * (float)n);
+    d_out[idx] *= norm;
 }

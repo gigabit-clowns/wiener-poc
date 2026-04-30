@@ -112,7 +112,7 @@ fn run_wiener_gpu<'py>(
         iterations,
         allocator,
     )
-    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("CUDA Error: {e:?}")))?;
+    .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("CUDA Error: {e}")))?;
 
     let out = Array3::from_shape_vec((batch, n, n), result_vec).map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
