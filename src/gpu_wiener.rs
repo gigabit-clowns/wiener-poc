@@ -70,10 +70,10 @@ pub fn execute_wiener_pipeline_events(
     let stream_d2h = ctx.new_stream().map_err(|e| format!("{e:?}"))?;
 
     let event_uploaded = ctx
-        .new_event(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT)
+        .new_event(Some(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT))
         .map_err(|e| format!("{e:?}"))?;
     let event_computed = ctx
-        .new_event(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT)
+        .new_event(Some(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT))
         .map_err(|e| format!("{e:?}"))?;
 
     let d_defocus = stream_comp
@@ -149,8 +149,8 @@ pub fn execute_wiener_pipeline_events(
         event_uploaded
             .record(&stream_h2d)
             .map_err(|e| format!("{e:?}"))?;
-        event_uploaded
-            .wait(&stream_comp)
+        stream_comp
+            .wait(&event_uploaded)
             .map_err(|e| format!("{e:?}"))?;
 
         fft_r2c
@@ -191,8 +191,8 @@ pub fn execute_wiener_pipeline_events(
         event_computed
             .record(&stream_comp)
             .map_err(|e| format!("{e:?}"))?;
-        event_computed
-            .wait(&stream_d2h)
+        stream_d2h
+            .wait(&event_computed)
             .map_err(|e| format!("{e:?}"))?;
         stream_d2h
             .memcpy_dtoh(&d_out, &mut dst_pinned)
