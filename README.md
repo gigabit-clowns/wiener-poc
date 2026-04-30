@@ -69,7 +69,7 @@ El código que se haga no tiene que tener estándares altos de calidad, es una p
 - Soporte para CPU y GPU. En este caso se plantea que se pueda ejecutar en CPU y en CUDA como embajador de las GPUs.
 - En CUDA se tienen que poder escribir kernels a mano. El proof of concept deberá tener al menos uno.
 - En GPU se tiene poder ejecutar como un pipeline. Para ello, se requiere tener acceso a los Streams de CUDA o bien tener una capa por encima que lo gestione automáticamente (como sucede en JAX)
-<img width="1796" height="524" alt="image" src="https://gist.github.com/user-attachments/assets/3cf091e1-7df0-4dbd-a252-c2601660da17" />
+<img width="1796" height="524" alt="1" src="https://github.com/user-attachments/assets/89eb327b-2007-411d-8fd5-f769af8f1387" />
 
 - Tiene que existir la posibilidad de usar un mecanismo de reserva de memoria custom (como por ejemplo uno que delegue en cudaHostAlloc)
 - Para poner a prueba los últimos tres puntos se plantea la siguiente prueba:
