@@ -91,15 +91,17 @@ pub fn execute_wiener_pipeline_events(
         .map_err(|e| format!("{e:?}"))?;
 
     let rank = [n_i32, n_i32];
-    let out_embed = [n_i32, freq_width_i32];
-    let in_embed = [n_i32, freq_width_i32];
+    let in_embed_r2c = [n_i32, n_i32];
+    let out_embed_r2c = [n_i32, freq_width_i32];
+    let in_embed_c2r = [n_i32, freq_width_i32];
+    let out_embed_c2r = [n_i32, n_i32];
 
     let fft_r2c = CudaFft::plan_many(
         &rank,
-        None,
+        Some(&in_embed_r2c),
         1,
         (n * n) as i32,
-        Some(&out_embed),
+        Some(&out_embed_r2c),
         1,
         (n * freq_width) as i32,
         cufftType::CUFFT_R2C,
@@ -110,10 +112,10 @@ pub fn execute_wiener_pipeline_events(
 
     let fft_c2r = CudaFft::plan_many(
         &rank,
-        Some(&in_embed),
+        Some(&in_embed_c2r),
         1,
         (n * freq_width) as i32,
-        None,
+        Some(&out_embed_c2r),
         1,
         (n * n) as i32,
         cufftType::CUFFT_C2R,
