@@ -1,0 +1,18 @@
+[package]
+name = "wiener_poc"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "wiener_poc"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
+rust-numpy = "0.21.0"
+ndarray = "0.15.6"
+cudarc = "0.11.0"
+multiversion = "0.7.3"
+
+[build-dependencies]
+cc = "1.0"
