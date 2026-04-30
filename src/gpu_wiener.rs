@@ -1,5 +1,4 @@
-use cudarc::driver::{CudaDevice, CudaStream, DriverError, LaunchAsync, LaunchConfig};
-use std::sync::Arc;
+use cudarc::driver::{CudaDevice, DriverError, LaunchConfig};
 
 pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
     // 1. Initialize GPU (device 0)
@@ -9,27 +8,20 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
     // include_bytes! injects binary directly into our Rust's executable
     let ptx = include_bytes!(concat!(env!("OUT_DIR"), "/wiener.ptx"));
     dev.load_ptx(ptx.to_vec(), "wiener", &["wiener_dummy"])?;
+    
+    // Get function (ya no requiere LaunchAsync)
     let f = dev.get_func("wiener", "wiener_dummy").unwrap();
 
-    // 3. Create the three requested Streams to overlap operations
-    let stream_h2d = dev.fork_default_stream()?; // Stream A: Upload (Host to Device)
-    let stream_kernel = dev.fork_default_stream()?; // Stream B: Compute
-    let stream_d2h = dev.fork_default_stream()?; // Stream C: Download (Device to Host)
-
     let num_elements = data.len();
-    
-    // NOTE: For initial PoC, we will implement synchronous version here to watch
-    // memory be uploaded & downloaded. In the next step we will implement events
-    // & pinned memory to achieve asynchronous overlap.
 
-    // Allocate GPU memory
+    // 3. Allocate GPU memory
     let mut d_in = dev.alloc_zeros::<f32>(num_elements)?;
     let mut d_out = dev.alloc_zeros::<f32>(num_elements)?;
 
-    // Copy data (Host -> Device)
+    // 4. Copy data (Host -> Device)
     dev.htod_sync_copy_into(data, &mut d_in)?;
 
-    // Configure Kernel grid (Grid / Block)
+    // 5. Configure Kernel grid (Grid / Block)
     let threads_per_block = 256;
     let blocks = (num_elements as u32 + threads_per_block - 1) / threads_per_block;
     let cfg = LaunchConfig {
@@ -38,10 +30,10 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
         shared_mem_bytes: 0,
     };
 
-    // Run kernel
+    // 6. Run kernel con
     unsafe { f.launch(cfg, (&mut d_out, &d_in, num_elements as i32)) }?;
 
-    // Copy final result back (Device -> Host)
+    // 7. Copy final result back (Device -> Host)
     let result = dev.sync_reclaim(d_out)?;
 
     Ok(result)
