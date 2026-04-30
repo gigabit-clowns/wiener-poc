@@ -15,7 +15,7 @@ jobs:
       - name: Install CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.16
         with:
-          cuda: '12.2.0' # Arbitrary (standard but mature version)
+          cuda: '12.8.1' # Arbitrary (standard but mature version) - we use in x4
           method: 'network'
           sub-packages: '["nvcc", "toolkit"]'
           non-cuda-sub-packages: '["libcublas", "libcufft", "libcusolver"]'
