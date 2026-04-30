@@ -1,11 +1,19 @@
 import numpy as np
-import wiener_poc
+
+try:
+    import wiener_poc  # type: ignore[import-not-found]
+except ImportError:
+    wiener_poc = None
 
 def main():
     print("=== Rust PoC: Wiener Filter ===")
     
     in_data = np.ones(10, dtype=np.float32)
     print(f"Input: {in_data}")
+
+    if wiener_poc is None:
+        print("wiener_poc no esta instalado todavia. Se omiten las pruebas Rust.")
+        return
 
     # Prueba 1: CPU (AVX2/AVX512 dinámico)
     out_cpu = wiener_poc.run_wiener_cpu(in_data)
