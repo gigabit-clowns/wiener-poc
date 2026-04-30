@@ -17,18 +17,26 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
     // Final array where we will store the processed data
     let mut final_result = vec![0.0f32; num_elements];
 
-    // 2. FEARLESS CONCURRENCY: Create a thread "Scope". 
-    // Rust guarantees all threads will finish before exiting this scope.
-    thread::scope(|s| {
-        // Channels to pass GPU memory pointers between threads
-        let (tx_comp, rx_comp) = mpsc::channel();
-        let (tx_d2h, rx_d2h) = mpsc::channel();
+    // Channels to pass GPU memory pointers between threads
+    let (tx_comp, rx_comp) = mpsc::channel();
+    let (tx_d2h, rx_d2h) = mpsc::channel();
 
+    // Clone the CudaContext (which is an Arc internally) for each thread
+    // This is cheap and allows each thread to own a reference to the GPU context.
+    let ctx_h2d = ctx.clone();
+    let ctx_comp = ctx.clone();
+    let ctx_d2h = ctx.clone();
+
+    // Create a mutable reference to safely pass into Thread 3
+    let result_ref = &mut final_result;
+
+    // 2. FEARLESS CONCURRENCY: Create a thread "Scope". 
+    thread::scope(|s| {
         // ---------------------------------------------------------
         // THREAD 1: Upload (Host -> Device)
         // ---------------------------------------------------------
-        s.spawn(|| {
-            let stream_h2d = ctx.new_stream().unwrap();
+        s.spawn(move || {
+            let stream_h2d = ctx_h2d.new_stream().unwrap();
             for i in 0..num_chunks {
                 let start = i * chunk_size;
                 // Adjust in case the last chunk is not perfectly divisible
@@ -47,8 +55,8 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
         // ---------------------------------------------------------
         // THREAD 2: Compute (JIT Kernel)
         // ---------------------------------------------------------
-        s.spawn(|| {
-            let stream_comp = ctx.new_stream().unwrap();
+        s.spawn(move || {
+            let stream_comp = ctx_comp.new_stream().unwrap();
             
             // This loop sleeps until data arrives from Thread 1
             for (start, end, d_in) in rx_comp {
@@ -84,8 +92,8 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
         // ---------------------------------------------------------
         // THREAD 3: Download (Device -> Host)
         // ---------------------------------------------------------
-        s.spawn(|| {
-            let stream_d2h = ctx.new_stream().unwrap();
+        s.spawn(move || {
+            let stream_d2h = ctx_d2h.new_stream().unwrap();
             
             // This loop sleeps until Thread 2 passes the processed chunk
             for (start, end, d_out) in rx_d2h {
@@ -93,8 +101,7 @@ pub fn execute_wiener_pipeline(data: &[f32]) -> Result<Vec<f32>, DriverError> {
                 let host_chunk = stream_d2h.clone_dtoh(&d_out).unwrap();
                 
                 // Write directly into the final memory. 
-                // Rust allows this because it knows only this thread writes to the array.
-                final_result[start..end].copy_from_slice(&host_chunk);
+                result_ref[start..end].copy_from_slice(&host_chunk);
             }
         });
     });
