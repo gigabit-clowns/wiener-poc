@@ -27,7 +27,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: --release --out dist
+          args: --release --out dist -vv
 
       - name: Upload Wheel as Artifact
         uses: actions/upload-artifact@v4
