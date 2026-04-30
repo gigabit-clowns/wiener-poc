@@ -51,14 +51,20 @@ pub fn execute_wiener_pipeline_events(
     let norm = 1.0f32 / ((n * n) as f32);
 
     let mut src_pinned = match allocator {
-        HostMemoryAllocator::CudaHostAlloc => ctx
-            .alloc_pinned::<f32>(num_elements)
-            .map_err(|e| format!("{e:?}"))?,
+        HostMemoryAllocator::CudaHostAlloc => unsafe {
+            // SAFETY: cudarc marks pinned allocation as unsafe because host memory is manually
+            // managed by CUDA; we keep ownership within this scope and use the returned buffer
+            // only through safe APIs before drop.
+            ctx.alloc_pinned::<f32>(num_elements)
+        }
+        .map_err(|e| format!("{e:?}"))?,
     };
     let mut dst_pinned = match allocator {
-        HostMemoryAllocator::CudaHostAlloc => ctx
-            .alloc_pinned::<f32>(num_elements)
-            .map_err(|e| format!("{e:?}"))?,
+        HostMemoryAllocator::CudaHostAlloc => unsafe {
+            // SAFETY: same rationale as src_pinned allocation above.
+            ctx.alloc_pinned::<f32>(num_elements)
+        }
+        .map_err(|e| format!("{e:?}"))?,
     };
     src_pinned
         .as_mut_slice()
