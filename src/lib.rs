@@ -6,15 +6,15 @@ mod cpu_wiener;
 
 #[pyfunction]
 fn run_wiener_gpu<'py>(py: Python<'py>, array: PyReadonlyArray1<f32>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-    let data_slice = array.as_slice().unwrap();
-    let result_vec = gpu_wiener::execute_wiener_pipeline_events(data_slice).unwrap();
+    let data_slice = array.as_slice()?;
+    let result_vec = gpu_wiener::execute_wiener_pipeline_events(data_slice)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("CUDA Error: {:?}", e)))?;
     Ok(result_vec.into_pyarray(py))
 }
 
 #[pyfunction]
 fn run_wiener_cpu<'py>(py: Python<'py>, array: PyReadonlyArray1<f32>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-    let mut data_vec = array.as_slice().unwrap().to_vec();
-    // Llamamos a la versión SIMD multiversionada
+    let mut data_vec = array.as_slice()?.to_vec();
     cpu_wiener::apply_wiener_cpu_simd(&mut data_vec);
     Ok(data_vec.into_pyarray(py))
 }
