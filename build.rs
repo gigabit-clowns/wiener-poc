@@ -13,7 +13,7 @@ fn main() {
     // Invoke nvcc to generate PTX
     let status = Command::new("nvcc")
         .arg("-ptx") // Generate intermediate PTX code
-        .arg("-arch=sm_75") // Defines architecture to be built to
+        .arg("-arch=sm_61") // Defines architecture to be built to
         .arg("cuda_kernels/wiener.cu")
         .arg("-o")
         .arg(&ptx_path)
