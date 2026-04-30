@@ -15,7 +15,7 @@ fn run_wiener_gpu<'py>(py: Python<'py>, data: PyReadonlyArray1<'py, f32>) -> PyR
     match gpu_wiener::execute_wiener_pipeline(input_slice) {
         Ok(result_vec) => {
             // Convert Rust's result vector into a NumPy array
-            Ok(result_vec.into_pyarray_bound(py))
+            Ok(result_vec.into_pyarray(py))
         },
         Err(e) => {
             // If CUDA crashes, we throw an Python-native exception
