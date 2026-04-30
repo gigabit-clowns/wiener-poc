@@ -2,6 +2,7 @@ use cudarc::driver::{CudaContext, DriverError, LaunchConfig, PushKernelArg};
 use cudarc::nvrtc::Ptx;
 
 pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverError> {
+    // 1. Setup
     let ctx = CudaContext::new(0)?;
     let ptx_src = include_str!(concat!(env!("OUT_DIR"), "/wiener.ptx"));
     let module = ctx.load_module(Ptx::from(ptx_src))?;
@@ -10,31 +11,33 @@ pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverEr
     let num_elements = data.len();
     let n_i32 = num_elements as i32;
 
-    // 1. Pinned Memory (Requirement 5.1)
+    // 2. Pinned Memory (Requirement 5.1)
     let mut src_pinned = ctx.alloc_pinned::<f32>(num_elements)?;
     let mut dst_pinned = ctx.alloc_pinned::<f32>(num_elements)?;
-    
-    // as_mut_slice() returns a Result, so we use '?'
+
+    // as_mut_slice() devuelve un Result<&mut [T], DriverError>, necesitamos el '?'
     src_pinned.as_mut_slice()?.copy_from_slice(data);
 
-    // 2. Streams & Events
+    // 3. Streams & Events (Requirement 5.2)
     let stream_h2d = ctx.new_stream()?;  
     let stream_comp = ctx.new_stream()?; 
     let stream_d2h = ctx.new_stream()?;  
 
-    let event_uploaded = ctx.new_event(None)?;
-    let event_computed = ctx.new_event(None)?;
+    // En 0.19.4 new_event requiere flags. Usamos Default (0).
+    let event_uploaded = ctx.new_event(Default::default())?;
+    let event_computed = ctx.new_event(Default::default())?;
 
     // --- PIPELINE EXECUTION ---
 
-    // A. Upload (Stream A)
+    // STEP A: Upload
     let d_in = stream_h2d.clone_htod(&src_pinned)?;
-    // The Event records itself into the stream
-    event_uploaded.record(&stream_h2d)?; 
+    
+    // IMPORTANTE: En cudarc 0.19.4 la sincronización se hace a través del CONTEXTO
+    ctx.record_event(&stream_h2d, &event_uploaded)?;
 
-    // B. Compute (Stream B)
-    // Synchronize: Stream B waits for the upload event
-    stream_comp.wait_event(&event_uploaded)?;
+    // STEP B: Compute
+    // El contexto ordena a stream_comp esperar por event_uploaded
+    ctx.wait_event(&stream_comp, &event_uploaded)?;
     
     let mut d_out = stream_comp.alloc_zeros::<f32>(num_elements)?;
     let threads = 256;
@@ -53,17 +56,16 @@ pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverEr
             .launch(cfg)?;
     }
     
-    // Record compute completion
-    event_computed.record(&stream_comp)?;
+    ctx.record_event(&stream_comp, &event_computed)?;
 
-    // C. Download (Stream C)
-    // Synchronize: Stream C waits for the compute event
-    stream_d2h.wait_event(&event_computed)?;
+    // STEP C: Download
+    ctx.wait_event(&stream_d2h, &event_computed)?;
     
     stream_d2h.memcpy_dtoh(&d_out, &mut dst_pinned)?;
 
-    // Final synchronization to ensure work is done
+    // Sincronizamos para poder leer los datos en el Host
     stream_d2h.synchronize()?;
 
+    // as_slice() también devuelve un Result
     Ok(dst_pinned.as_slice()?.to_vec())
 }
