@@ -12,18 +12,19 @@ pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverEr
     let n_i32 = num_elements as i32;
 
     // REQUIREMENT 5.1: Allocation with cudaHostAlloc (Pinned Memory)
-    // alloc_pinned guarantees page-locked memory for fast DMA transfers.
+    // We use alloc_pinned to guarantee page-locked memory for high-performance DMA.
     let mut src_pinned = ctx.alloc_pinned::<f32>(num_elements)?;
     let mut dst_pinned = ctx.alloc_pinned::<f32>(num_elements)?;
 
-    src_pinned.copy_from_slice(data);
+    // Use .as_mut_slice() to access the underlying memory of the PinnedHostSlice
+    src_pinned.as_mut_slice().copy_from_slice(data);
 
-    // REQUIREMENT 5.2: Separate Streams
+    // REQUIREMENT 5.2: Separate Streams for Pipelining
     let stream_h2d = ctx.new_stream()?;  // Stream A: Upload
     let stream_comp = ctx.new_stream()?; // Stream B: Compute
     let stream_d2h = ctx.new_stream()?;  // Stream C: Download
 
-    // Events for synchronization
+    // Create events for GPU-side synchronization (Requirement 5.3)
     let event_uploaded = ctx.new_event(None)?;
     let event_computed = ctx.new_event(None)?;
 
@@ -31,11 +32,13 @@ pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverEr
 
     // STEP A: Upload data using Stream A
     let d_in = stream_h2d.clone_htod(&src_pinned)?;
-    stream_h2d.record_event(&event_uploaded)?;
+    
+    // In cudarc 0.19.4, the event records itself into the stream
+    event_uploaded.record(&stream_h2d)?;
 
     // STEP B: Compute on Stream B
-    // Wait for the upload event on Stream B
-    stream_comp.wait_for_event(&event_uploaded)?;
+    // Wait for Stream A to finish upload without blocking the CPU
+    stream_comp.wait_event(&event_uploaded)?;
     
     let mut d_out = stream_comp.alloc_zeros::<f32>(num_elements)?;
     let threads = 256;
@@ -53,18 +56,20 @@ pub fn execute_wiener_pipeline_events(data: &[f32]) -> Result<Vec<f32>, DriverEr
             .arg(&n_i32)
             .launch(cfg)?;
     }
-    stream_comp.record_event(&event_computed)?;
+    
+    // Record compute completion
+    event_computed.record(&stream_comp)?;
 
     // STEP C: Download on Stream C
-    // Wait for the computation event on Stream C
-    stream_d2h.wait_for_event(&event_computed)?;
+    // Wait for the kernel to finish
+    stream_d2h.wait_event(&event_computed)?;
     
-    // Download into Pinned Memory
+    // Download into Pinned Memory (Dst)
     stream_d2h.memcpy_dtoh(&d_out, &mut dst_pinned)?;
 
-    // Final synchronization of the last stream
+    // Final synchronization: ensures the GPU has finished all work
     stream_d2h.synchronize()?;
 
-    // Return as a standard Vec
-    Ok(dst_pinned.to_vec())
+    // Convert Pinned Memory back to Vec to return to Python
+    Ok(dst_pinned.as_slice().to_vec())
 }
