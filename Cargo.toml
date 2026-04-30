@@ -10,7 +10,6 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.28.3", features = ["extension-module"] }
 numpy = "0.28.0"
-ndarray = "0.17.2"
 cudarc = { version = "0.19.4", features = ["cuda-version-from-build-system"] }
 multiversion = "0.8.0"
 
