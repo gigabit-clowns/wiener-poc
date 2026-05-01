@@ -13,7 +13,9 @@ except ImportError:
 DEFAULT_BATCH = 1024
 DEFAULT_BOX = 512
 DEFAULT_REPEATS_CPU = 2
-DEFAULT_REPEATS_GPU = 20
+DEFAULT_REPEATS_GPU = 3
+DEFAULT_WARMUP_CPU = 0
+DEFAULT_WARMUP_GPU = 1
 DEFAULT_SKIP_REFERENCE = True
 
 
@@ -50,6 +52,18 @@ def _run_timed(fn, repeats: int):
     return out, times
 
 
+def _print_timing_stats(label: str, times: list[float], section_wall_s: float, warmups: int):
+    total_timed = float(np.sum(times))
+    print(
+        f"{label} time/call -> min {min(times):.3f}s | mean {np.mean(times):.3f}s | max {max(times):.3f}s"
+    )
+    print(
+        f"{label} total timed ({len(times)} iter): {total_timed:.3f}s | section wall: {section_wall_s:.3f}s"
+    )
+    if warmups > 0:
+        print(f"{label} warmup iter no cronometradas: {warmups}")
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Benchmark simple CPU/GPU Wiener vs referencia NumPy"
@@ -63,10 +77,24 @@ def _parse_args():
         "--repeats-gpu", type=int, default=DEFAULT_REPEATS_GPU, help="Repeticiones para GPU"
     )
     parser.add_argument(
+        "--warmup-cpu", type=int, default=DEFAULT_WARMUP_CPU, help="Warmup CPU sin cronometrar"
+    )
+    parser.add_argument(
+        "--warmup-gpu", type=int, default=DEFAULT_WARMUP_GPU, help="Warmup GPU sin cronometrar"
+    )
+    parser.set_defaults(skip_reference=DEFAULT_SKIP_REFERENCE)
+    ref_group = parser.add_mutually_exclusive_group()
+    ref_group.add_argument(
         "--skip-reference",
+        dest="skip_reference",
         action="store_true",
-        default=DEFAULT_SKIP_REFERENCE,
         help="Omitir referencia NumPy para pruebas de solo rendimiento",
+    )
+    ref_group.add_argument(
+        "--with-reference",
+        dest="skip_reference",
+        action="store_false",
+        help="Calcular tambien referencia NumPy y validar contra ella",
     )
     return parser.parse_args()
 
@@ -91,6 +119,11 @@ def main():
     print(
         f"Huella host aproximada durante ejecucion: ~{estimated_host_gib:.2f} GiB ({estimated_host_tensors} tensores grandes)"
     )
+    if args.repeats_cpu != args.repeats_gpu:
+        print(
+            f"Aviso: repeats distintos (CPU={args.repeats_cpu}, GPU={args.repeats_gpu})."
+        )
+        print("Para comparar wall-time justo usa los mismos repeats en ambas rutas.")
     print(
         "Consejo monitorizacion: abre htop/nvtop antes de lanzar este script para ver uso sostenido."
     )
@@ -117,6 +150,16 @@ def main():
         return
 
     # Prueba 1: CPU (dispatch runtime SSE2/AVX2/AVX512)
+    cpu_section_t0 = time.perf_counter()
+    for _ in range(args.warmup_cpu):
+        _ = wiener_poc.run_wiener_cpu(
+            images32,
+            defocus32,
+            params["pixel_size"],
+            params["wavelength"],
+            params["spherical_aberration"],
+            params["q0"],
+        )
     out_cpu, cpu_times = _run_timed(
         lambda: wiener_poc.run_wiener_cpu(
             images32,
@@ -128,9 +171,13 @@ def main():
         ),
         args.repeats_cpu,
     )
+    cpu_section_t1 = time.perf_counter()
     print(f"CPU output shape: {out_cpu.shape}")
-    print(
-        f"CPU time -> min {min(cpu_times):.3f}s | mean {np.mean(cpu_times):.3f}s | max {max(cpu_times):.3f}s"
+    _print_timing_stats(
+        label="CPU",
+        times=cpu_times,
+        section_wall_s=cpu_section_t1 - cpu_section_t0,
+        warmups=args.warmup_cpu,
     )
     assert out_cpu.shape == images32.shape, "Forma invalida en CPU"
     assert np.isfinite(out_cpu).all(), "CPU devolvio NaN/Inf"
@@ -140,6 +187,18 @@ def main():
         )
 
     # Prueba 2: GPU (Pipeline 3 Streams + CudaEvents + cudaHostAlloc)
+    gpu_section_t0 = time.perf_counter()
+    for _ in range(args.warmup_gpu):
+        _ = wiener_poc.run_wiener_gpu(
+            images32,
+            defocus32,
+            params["pixel_size"],
+            params["wavelength"],
+            params["spherical_aberration"],
+            params["q0"],
+            1,
+            "cudaHostAlloc",
+        )
     out_gpu, gpu_times = _run_timed(
         lambda: wiener_poc.run_wiener_gpu(
             images32,
@@ -153,9 +212,13 @@ def main():
         ),
         args.repeats_gpu,
     )
+    gpu_section_t1 = time.perf_counter()
     print(f"GPU output shape: {out_gpu.shape}")
-    print(
-        f"GPU time -> min {min(gpu_times):.3f}s | mean {np.mean(gpu_times):.3f}s | max {max(gpu_times):.3f}s"
+    _print_timing_stats(
+        label="GPU",
+        times=gpu_times,
+        section_wall_s=gpu_section_t1 - gpu_section_t0,
+        warmups=args.warmup_gpu,
     )
     assert out_gpu.shape == images32.shape, "Forma invalida en GPU"
     assert np.isfinite(out_gpu).all(), "GPU devolvio NaN/Inf"
